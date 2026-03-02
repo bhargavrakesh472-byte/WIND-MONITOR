@@ -176,10 +176,34 @@
 
         .status-online {
             background: #4caf50;
+            animation: pulse 2s infinite;
         }
 
-        .status-offline {
-            background: #f44336;
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+            }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .error-message {
+            color: #f44336;
+            text-align: center;
+            padding: 10px;
+            background: #ffebee;
+            border-radius: 8px;
+            margin: 10px 0;
         }
 
         @media (max-width: 768px) {
@@ -202,13 +226,13 @@
                 <h3>Current Temperature</h3>
                 <span class="value" id="current-temp">--</span>
                 <span class="unit">°C</span>
-                <div class="timestamp" id="temp-time">Last update: --</div>
+                <div class="timestamp" id="temp-time">Waiting for data...</div>
             </div>
             <div class="stat-card">
                 <h3>Current Voltage</h3>
                 <span class="value" id="current-voltage">--</span>
                 <span class="unit">V</span>
-                <div class="timestamp" id="voltage-time">Last update: --</div>
+                <div class="timestamp" id="voltage-time">Waiting for data...</div>
             </div>
             <div class="stat-card">
                 <h3>Average Temperature</h3>
@@ -228,9 +252,9 @@
             <div class="chart-header">
                 <div class="chart-title">Temperature & Voltage Trends</div>
                 <div class="chart-controls">
-                    <button class="chart-btn active" onclick="changeTimeRange('hour')">Hour</button>
-                    <button class="chart-btn" onclick="changeTimeRange('day')">Day</button>
-                    <button class="chart-btn" onclick="changeTimeRange('week')">Week</button>
+                    <button class="chart-btn active" onclick="changeTimeRange('hour', this)">Hour</button>
+                    <button class="chart-btn" onclick="changeTimeRange('day', this)">Day</button>
+                    <button class="chart-btn" onclick="changeTimeRange('week', this)">Week</button>
                 </div>
             </div>
             <canvas id="mainChart"></canvas>
@@ -249,7 +273,7 @@
                 </thead>
                 <tbody id="table-body">
                     <tr>
-                        <td colspan="4">Loading data...</td>
+                        <td colspan="4" class="loading">Loading data...</td>
                     </tr>
                 </tbody>
             </table>
@@ -272,6 +296,7 @@
         let mainChart;
         let currentTimeRange = 'hour';
         let historicalData = [];
+        let lastUpdateTime = null;
 
         // Initialize chart
         function initChart() {
@@ -287,7 +312,9 @@
                         backgroundColor: 'rgba(255, 107, 107, 0.1)',
                         tension: 0.4,
                         fill: true,
-                        yAxisID: 'y-temperature'
+                        yAxisID: 'y-temperature',
+                        pointRadius: 3,
+                        pointHoverRadius: 5
                     }, {
                         label: 'Voltage (V)',
                         data: [],
@@ -295,11 +322,14 @@
                         backgroundColor: 'rgba(78, 205, 196, 0.1)',
                         tension: 0.4,
                         fill: true,
-                        yAxisID: 'y-voltage'
+                        yAxisID: 'y-voltage',
+                        pointRadius: 3,
+                        pointHoverRadius: 5
                     }]
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     interaction: {
                         mode: 'index',
                         intersect: false,
@@ -308,19 +338,27 @@
                         legend: {
                             display: true,
                             position: 'top',
+                        },
+                        tooltip: {
+                            enabled: true,
+                            mode: 'index',
+                            intersect: false,
                         }
                     },
                     scales: {
-                        yTemperature: {
+                        'y-temperature': {
                             type: 'linear',
                             display: true,
                             position: 'left',
                             title: {
                                 display: true,
                                 text: 'Temperature (°C)'
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)',
                             }
                         },
-                        yVoltage: {
+                        'y-voltage': {
                             type: 'linear',
                             display: true,
                             position: 'right',
@@ -347,25 +385,21 @@
         function formatChartTime(timestamp, range) {
             const date = new Date(timestamp);
             if (range === 'hour') {
-                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             } else if (range === 'day') {
                 return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             } else {
-                return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                return date.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
             }
         }
 
         // Update current stats
-        function updateCurrentStats(snapshot) {
-            const data = snapshot.val();
-            if (data) {
-                document.getElementById('current-temp').textContent = data.Temperature?.toFixed(1) || '--';
-                document.getElementById('current-voltage').textContent = data.Voltage?.toFixed(1) || '--';
-                
-                const now = new Date();
-                document.getElementById('temp-time').textContent = `Last update: ${formatTimestamp(now)}`;
-                document.getElementById('voltage-time').textContent = `Last update: ${formatTimestamp(now)}`;
-            }
+        function updateCurrentStats(temp, voltage) {
+            const now = new Date();
+            document.getElementById('current-temp').textContent = temp !== undefined ? temp.toFixed(1) : '--';
+            document.getElementById('current-voltage').textContent = voltage !== undefined ? voltage.toFixed(1) : '--';
+            document.getElementById('temp-time').textContent = `Last update: ${formatTimestamp(now)}`;
+            document.getElementById('voltage-time').textContent = `Last update: ${formatTimestamp(now)}`;
         }
 
         // Update averages
@@ -391,7 +425,7 @@
             const recentData = [...historicalData].reverse().slice(0, 10);
             
             if (recentData.length === 0) {
-                tableBody.innerHTML = '<tr><td colspan="4">No data available</td></tr>';
+                tableBody.innerHTML = '<tr><td colspan="4" class="loading">No data available</td></tr>';
                 return;
             }
             
@@ -414,22 +448,60 @@
             
             const now = Date.now();
             let timeLimit;
+            let groupInterval;
             
             switch(currentTimeRange) {
                 case 'hour':
                     timeLimit = now - 60 * 60 * 1000;
+                    groupInterval = 1 * 60 * 1000; // 1 minute groups
                     break;
                 case 'day':
                     timeLimit = now - 24 * 60 * 60 * 1000;
+                    groupInterval = 30 * 60 * 1000; // 30 minute groups
                     break;
                 case 'week':
                     timeLimit = now - 7 * 24 * 60 * 60 * 1000;
+                    groupInterval = 3 * 60 * 60 * 1000; // 3 hour groups
                     break;
             }
             
-            const filteredData = historicalData
+            // Filter data within time range
+            let filteredData = historicalData
                 .filter(d => d.timestamp >= timeLimit)
                 .sort((a, b) => a.timestamp - b.timestamp);
+            
+            // Group data for better visualization
+            if (filteredData.length > 50) {
+                const groupedData = [];
+                const groups = {};
+                
+                filteredData.forEach(item => {
+                    const groupKey = Math.floor(item.timestamp / groupInterval) * groupInterval;
+                    if (!groups[groupKey]) {
+                        groups[groupKey] = {
+                            timestamps: [],
+                            temperatures: [],
+                            voltages: []
+                        };
+                    }
+                    groups[groupKey].timestamps.push(item.timestamp);
+                    groups[groupKey].temperatures.push(item.temperature);
+                    groups[groupKey].voltages.push(item.voltage);
+                });
+                
+                Object.keys(groups).sort().forEach(key => {
+                    const group = groups[key];
+                    const avgTemp = group.temperatures.reduce((a, b) => a + b, 0) / group.temperatures.length;
+                    const avgVolt = group.voltages.reduce((a, b) => a + b, 0) / group.voltages.length;
+                    groupedData.push({
+                        timestamp: parseInt(key),
+                        temperature: avgTemp,
+                        voltage: avgVolt
+                    });
+                });
+                
+                filteredData = groupedData;
+            }
             
             const labels = filteredData.map(d => formatChartTime(d.timestamp, currentTimeRange));
             const tempData = filteredData.map(d => d.temperature);
@@ -442,48 +514,120 @@
         }
 
         // Change time range
-        function changeTimeRange(range) {
+        function changeTimeRange(range, button) {
             currentTimeRange = range;
             
             // Update active button
             document.querySelectorAll('.chart-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
-            event.target.classList.add('active');
+            button.classList.add('active');
             
+            updateChart();
+        }
+
+        // Add new data point
+        function addDataPoint(temp, voltage) {
+            const now = Date.now();
+            
+            // Avoid duplicate entries within the same second
+            if (lastUpdateTime && (now - lastUpdateTime) < 1000) {
+                return;
+            }
+            
+            lastUpdateTime = now;
+            
+            historicalData.push({
+                timestamp: now,
+                temperature: temp,
+                voltage: voltage
+            });
+            
+            // Keep only last 7 days of data
+            const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+            historicalData = historicalData.filter(d => d.timestamp >= weekAgo);
+            
+            updateAverages();
+            updateTable();
             updateChart();
         }
 
         // Listen for real-time updates
         function initializeFirebaseListeners() {
-            // Listen for current data
-            database.ref('/WindMill').on('value', (snapshot) => {
-                updateCurrentStats(snapshot);
+            console.log("Initializing Firebase listeners...");
+            
+            // Listen for temperature changes
+            database.ref('/WindMill/Temperature').on('value', (snapshot) => {
+                const temperature = snapshot.val();
+                console.log("Temperature update:", temperature);
                 
-                // Add to historical data
-                const data = snapshot.val();
-                if (data && data.Temperature && data.Voltage) {
-                    historicalData.push({
-                        timestamp: Date.now(),
-                        temperature: data.Temperature,
-                        voltage: data.Voltage
-                    });
+                // Get current voltage and update
+                database.ref('/WindMill/Voltage').once('value', (voltageSnapshot) => {
+                    const voltage = voltageSnapshot.val();
+                    console.log("Voltage value:", voltage);
                     
-                    // Keep only last 7 days of data
-                    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-                    historicalData = historicalData.filter(d => d.timestamp >= weekAgo);
+                    if (temperature !== null && temperature !== undefined && 
+                        voltage !== null && voltage !== undefined) {
+                        updateCurrentStats(temperature, voltage);
+                        addDataPoint(temperature, voltage);
+                    }
+                });
+            }, (error) => {
+                console.error("Temperature listener error:", error);
+                document.getElementById('table-body').innerHTML = 
+                    '<tr><td colspan="4" class="error-message">Error connecting to Firebase. Please check your connection.</td></tr>';
+            });
+            
+            // Also listen for voltage changes independently
+            database.ref('/WindMill/Voltage').on('value', (snapshot) => {
+                const voltage = snapshot.val();
+                console.log("Voltage update:", voltage);
+                
+                // Get current temperature
+                database.ref('/WindMill/Temperature').once('value', (tempSnapshot) => {
+                    const temperature = tempSnapshot.val();
                     
-                    updateAverages();
-                    updateTable();
-                    updateChart();
+                    if (temperature !== null && temperature !== undefined && 
+                        voltage !== null && voltage !== undefined) {
+                        updateCurrentStats(temperature, voltage);
+                        addDataPoint(temperature, voltage);
+                    }
+                });
+            });
+            
+            // Check connection status
+            database.ref('.info/connected').on('value', (snapshot) => {
+                if (snapshot.val() === true) {
+                    console.log("Connected to Firebase");
+                } else {
+                    console.log("Disconnected from Firebase");
                 }
             });
         }
 
         // Initialize on page load
         window.onload = () => {
+            console.log("Page loaded, initializing...");
             initChart();
             initializeFirebaseListeners();
+            
+            // Add some dummy data for testing (remove in production)
+            // This helps visualize the chart if no real data is coming
+            setTimeout(() => {
+                if (historicalData.length === 0) {
+                    console.log("No data received, adding sample data for testing");
+                    const now = Date.now();
+                    for (let i = 60; i >= 0; i--) {
+                        historicalData.push({
+                            timestamp: now - i * 60 * 1000,
+                            temperature: 25 + Math.sin(i * 0.1) * 5,
+                            voltage: 12 + Math.cos(i * 0.1) * 2
+                        });
+                    }
+                    updateChart();
+                    updateTable();
+                }
+            }, 5000);
         };
     </script>
 </body>
